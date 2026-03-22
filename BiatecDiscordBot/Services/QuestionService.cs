@@ -8,6 +8,7 @@ namespace BiatecDiscordBot.Services;
 
 public class QuestionService : IQuestionService
 {
+    private const string UnknownUsername = "Unknown";
     private readonly BotDbContext _db;
     private readonly ILogger<QuestionService> _logger;
 
@@ -68,7 +69,7 @@ public class QuestionService : IQuestionService
             {
                 DiscordId = discordUserId,
                 GuildId = guildId,
-                Username = "Unknown",
+                Username = UnknownUsername,
                 JoinedAt = DateTime.UtcNow
             };
             _db.DiscordUsers.Add(user);
