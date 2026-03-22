@@ -23,6 +23,11 @@ public interface IDiscordBotService
     Task<IReadOnlyCollection<DiscordUserDto>> GetGuildUsersAsync(ulong guildId);
 
     /// <summary>
+    /// Resolves a Discord server name to its guild ID.
+    /// </summary>
+    Task<ulong?> GetGuildIdByServerNameAsync(string serverName);
+
+    /// <summary>
     /// Sends a direct message to a specific user.
     /// </summary>
     Task<bool> SendDirectMessageAsync(ulong userId, string message);

@@ -31,6 +31,7 @@ namespace BiatecDiscordBot
                 builder.Configuration.GetSection("Discord"));
 
             // Register services
+            builder.Services.AddMemoryCache();
             builder.Services.AddSingleton<IDiscordBotService, DiscordBotService>();
             builder.Services.AddScoped<IMessageTrackingService, MessageTrackingService>();
             builder.Services.AddScoped<IQuestionService, QuestionService>();

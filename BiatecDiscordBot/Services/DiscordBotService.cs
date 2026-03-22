@@ -4,6 +4,7 @@ using BiatecDiscordBot.Models.DTOs;
 using Discord;
 using Discord.WebSocket;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -17,16 +18,20 @@ public class DiscordBotSettings
 public class DiscordBotService : IDiscordBotService, IDisposable
 {
     private readonly DiscordSocketClient _client;
+    private readonly IMemoryCache _cache;
     private readonly ILogger<DiscordBotService> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly DiscordBotSettings _settings;
     private bool _disposed;
+    private const string GuildIdCacheKeyPrefix = "discord:guild-id:";
 
     public DiscordBotService(
+        IMemoryCache cache,
         ILogger<DiscordBotService> logger,
         IServiceProvider serviceProvider,
         IOptions<DiscordBotSettings> settings)
     {
+        _cache = cache;
         _logger = logger;
         _serviceProvider = serviceProvider;
         _settings = settings.Value;
@@ -56,10 +61,21 @@ public class DiscordBotService : IDiscordBotService, IDisposable
             _logger.LogWarning("Discord bot token is not configured. Bot will not start.");
             return;
         }
-
+        _client.PresenceUpdated += _client_PresenceUpdated;
+        
         await _client.LoginAsync(TokenType.Bot, _settings.Token);
         await _client.StartAsync();
+
+
         _logger.LogInformation("Discord bot started successfully.");
+
+        CacheConnectedGuilds();
+    }
+
+    private async Task _client_PresenceUpdated(SocketUser arg1, SocketPresence arg2, SocketPresence arg3)
+    {
+        _logger.LogInformation("PresenceUpdated {arg1} {arg2} {arg3}", arg1, arg2, arg3);
+
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -122,6 +138,35 @@ public class DiscordBotService : IDiscordBotService, IDisposable
 
         await db.SaveChangesAsync();
         return users;
+    }
+
+    public Task<ulong?> GetGuildIdByServerNameAsync(string serverName)
+    {
+        if (string.IsNullOrWhiteSpace(serverName))
+        {
+            return Task.FromResult<ulong?>(null);
+        }
+
+        var cacheKey = GetGuildIdCacheKey(serverName);
+        if (_cache.TryGetValue<ulong>(cacheKey, out var cachedGuildId))
+        {
+            return Task.FromResult<ulong?>(cachedGuildId);
+        }
+
+        var guild = _client.Guilds.FirstOrDefault(g => string.Equals(g.Name, serverName, StringComparison.OrdinalIgnoreCase));
+        if (guild == null)
+        {
+            _logger.LogWarning("Guild with server name {ServerName} was not found.", serverName);
+            return Task.FromResult<ulong?>(null);
+        }
+
+        _cache.Set(cacheKey, guild.Id, new MemoryCacheEntryOptions
+        {
+            SlidingExpiration = TimeSpan.FromHours(6),
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1)
+        });
+
+        return Task.FromResult<ulong?>(guild.Id);
     }
 
     public async Task<bool> SendDirectMessageAsync(ulong userId, string message)
@@ -325,6 +370,21 @@ public class DiscordBotService : IDiscordBotService, IDisposable
         _logger.Log(severity, log.Exception, "[Discord] {Message}", log.Message);
         return Task.CompletedTask;
     }
+
+    private void CacheConnectedGuilds()
+    {
+        foreach (var guild in _client.Guilds)
+        {
+            _cache.Set(GetGuildIdCacheKey(guild.Name), guild.Id, new MemoryCacheEntryOptions
+            {
+                SlidingExpiration = TimeSpan.FromHours(6),
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1)
+            });
+        }
+    }
+
+    private static string GetGuildIdCacheKey(string serverName) =>
+        $"{GuildIdCacheKeyPrefix}{serverName.Trim().ToUpperInvariant()}";
 
     public void Dispose()
     {

@@ -38,6 +38,7 @@ public class DiscordControllerTests
     public async Task GetGuildUsers_ShouldReturnUsers()
     {
         // Arrange
+        const string serverName = "VoteCoin";
         var users = new List<DiscordUserDto>
         {
             new() { DiscordId = 1, Username = "User1" },
@@ -45,11 +46,15 @@ public class DiscordControllerTests
         };
 
         _botServiceMock
+            .Setup(s => s.GetGuildIdByServerNameAsync(serverName))
+            .ReturnsAsync(123UL);
+
+        _botServiceMock
             .Setup(s => s.GetGuildUsersAsync(123))
             .ReturnsAsync(users);
 
         // Act
-        var result = await _controller.GetGuildUsers(123);
+        var result = await _controller.GetGuildUsers(serverName);
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -105,12 +110,17 @@ public class DiscordControllerTests
     public async Task AssignRole_ShouldReturnOk_WhenSuccessful()
     {
         // Arrange
+        const string serverName = "VoteCoin";
+        _botServiceMock
+            .Setup(s => s.GetGuildIdByServerNameAsync(serverName))
+            .ReturnsAsync(1UL);
+
         _botServiceMock
             .Setup(s => s.AssignRoleAsync(1, 2, 3))
             .ReturnsAsync(true);
 
         // Act
-        var result = await _controller.AssignRole(1, 2, 3);
+        var result = await _controller.AssignRole(serverName, 2, 3);
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
@@ -120,12 +130,17 @@ public class DiscordControllerTests
     public async Task AssignRole_ShouldReturnBadRequest_WhenFailed()
     {
         // Arrange
+        const string serverName = "VoteCoin";
+        _botServiceMock
+            .Setup(s => s.GetGuildIdByServerNameAsync(serverName))
+            .ReturnsAsync(1UL);
+
         _botServiceMock
             .Setup(s => s.AssignRoleAsync(1, 2, 3))
             .ReturnsAsync(false);
 
         // Act
-        var result = await _controller.AssignRole(1, 2, 3);
+        var result = await _controller.AssignRole(serverName, 2, 3);
 
         // Assert
         Assert.IsType<BadRequestObjectResult>(result);

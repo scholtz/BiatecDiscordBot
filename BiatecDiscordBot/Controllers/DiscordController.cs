@@ -33,12 +33,19 @@ public class DiscordController : ControllerBase
     /// <summary>
     /// Gets all users from a specific Discord guild.
     /// </summary>
-    /// <param name="guildId">The Discord guild (server) ID.</param>
-    [HttpGet("guilds/{guildId}/users")]
+    /// <param name="serverName">The Discord server name.</param>
+    [HttpGet("servers/{serverName}/users")]
     [ProducesResponseType(typeof(IReadOnlyCollection<DiscordUserDto>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetGuildUsers(ulong guildId)
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetGuildUsers(string serverName)
     {
-        var users = await _botService.GetGuildUsersAsync(guildId);
+        var guildId = await _botService.GetGuildIdByServerNameAsync(serverName);
+        if (!guildId.HasValue)
+        {
+            return NotFound(new { Error = $"Server '{serverName}' was not found." });
+        }
+
+        var users = await _botService.GetGuildUsersAsync(guildId.Value);
         return Ok(users);
     }
 
@@ -91,15 +98,22 @@ public class DiscordController : ControllerBase
     /// <summary>
     /// Assigns a Discord role to a user in a guild.
     /// </summary>
-    /// <param name="guildId">The guild ID.</param>
+    /// <param name="serverName">The server name.</param>
     /// <param name="userId">The user ID.</param>
     /// <param name="roleId">The role ID.</param>
-    [HttpPost("guilds/{guildId}/users/{userId}/roles/{roleId}")]
+    [HttpPost("servers/{serverName}/users/{userId}/roles/{roleId}")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> AssignRole(ulong guildId, ulong userId, ulong roleId)
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AssignRole(string serverName, ulong userId, ulong roleId)
     {
-        var success = await _botService.AssignRoleAsync(guildId, userId, roleId);
+        var guildId = await _botService.GetGuildIdByServerNameAsync(serverName);
+        if (!guildId.HasValue)
+        {
+            return NotFound(new { Error = $"Server '{serverName}' was not found." });
+        }
+
+        var success = await _botService.AssignRoleAsync(guildId.Value, userId, roleId);
         if (!success)
         {
             return BadRequest(new { Error = "Failed to assign role." });
