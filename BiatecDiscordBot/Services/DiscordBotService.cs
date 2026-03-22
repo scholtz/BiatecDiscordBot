@@ -2,6 +2,7 @@ using BiatecDiscordBot.Data;
 using BiatecDiscordBot.Models;
 using BiatecDiscordBot.Models.DTOs;
 using Discord;
+using Discord.Net;
 using Discord.WebSocket;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -22,8 +23,13 @@ public class DiscordBotService : IDiscordBotService, IDisposable
     private readonly ILogger<DiscordBotService> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly DiscordBotSettings _settings;
+    private readonly SemaphoreSlim _startLock = new(1, 1);
     private bool _disposed;
+    private volatile bool _isReady;
+    private TaskCompletionSource<bool>? _readyTcs;
     private const string GuildIdCacheKeyPrefix = "discord:guild-id:";
+    private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(30);
+    private const string BotTokenPrefix = "Bot ";
 
     public DiscordBotService(
         IMemoryCache cache,
@@ -48,42 +54,129 @@ public class DiscordBotService : IDiscordBotService, IDisposable
 
         _client = new DiscordSocketClient(config);
         _client.Log += LogAsync;
+        _client.Connected += OnConnectedAsync;
+        _client.Ready += OnReadyAsync;
+        _client.Disconnected += OnDisconnectedAsync;
+        _client.PresenceUpdated += OnPresenceUpdatedAsync;
         _client.MessageReceived += OnMessageReceivedAsync;
         _client.ReactionAdded += OnReactionAddedAsync;
     }
 
-    public bool IsConnected => _client.ConnectionState == ConnectionState.Connected;
+    public bool IsConnected => _isReady && _client.ConnectionState == ConnectionState.Connected;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_settings.Token))
+        var token = NormalizeBotToken(_settings.Token);
+
+        if (string.IsNullOrWhiteSpace(token))
         {
             _logger.LogWarning("Discord bot token is not configured. Bot will not start.");
             return;
         }
-        _client.PresenceUpdated += _client_PresenceUpdated;
-        
-        await _client.LoginAsync(TokenType.Bot, _settings.Token);
-        await _client.StartAsync();
 
+        await _startLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (IsConnected)
+            {
+                _logger.LogInformation("Discord bot is already connected.");
+                return;
+            }
 
-        _logger.LogInformation("Discord bot started successfully.");
+            _isReady = false;
+            _readyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        CacheConnectedGuilds();
+            await _client.LoginAsync(TokenType.Bot,  token);
+            await _client.StartAsync();
+
+            using var readyTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            readyTimeoutCts.CancelAfter(ReadyTimeout);
+
+            try
+            {
+                await _readyTcs.Task.WaitAsync(readyTimeoutCts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Discord bot did not reach the Ready state within {ReadyTimeout.TotalSeconds} seconds.");
+            }
+
+            _logger.LogInformation("Discord bot started successfully. Connected guilds: {GuildCount}.", _client.Guilds.Count);
+        }
+        catch (HttpException ex) when (ex.DiscordCode == 0 && ex.HttpCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            _logger.LogError(ex,
+                "Discord authentication failed with 401 Unauthorized. Verify that the configured token is the raw bot token from the Discord Developer Portal Bot page and does not include the 'Bot ' prefix, quotes, or extra whitespace.");
+            throw;
+        }
+        finally
+        {
+            _startLock.Release();
+        }
     }
 
-    private async Task _client_PresenceUpdated(SocketUser arg1, SocketPresence arg2, SocketPresence arg3)
+    private Task OnConnectedAsync()
     {
-        _logger.LogInformation("PresenceUpdated {arg1} {arg2} {arg3}", arg1, arg2, arg3);
+        _logger.LogInformation("Discord gateway connected. ConnectionState: {ConnectionState}, LoginState: {LoginState}.",
+            _client.ConnectionState, _client.LoginState);
 
+        return Task.CompletedTask;
+    }
+
+    private Task OnReadyAsync()
+    {
+        _isReady = true;
+        CacheConnectedGuilds();
+        _readyTcs?.TrySetResult(true);
+
+        _logger.LogInformation("Discord client ready as {Username}. Connected guilds: {GuildCount}.",
+            _client.CurrentUser?.Username,
+            _client.Guilds.Count);
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnDisconnectedAsync(Exception? exception)
+    {
+        _isReady = false;
+
+        if (_readyTcs is { Task.IsCompleted: false })
+        {
+            _readyTcs.TrySetException(exception ?? new InvalidOperationException("Discord client disconnected before reaching the Ready state."));
+        }
+
+        if (exception == null)
+        {
+            _logger.LogWarning("Discord gateway disconnected.");
+        }
+        else
+        {
+            _logger.LogError(exception, "Discord gateway disconnected.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnPresenceUpdatedAsync(SocketUser user, SocketPresence before, SocketPresence after)
+    {
+        _logger.LogInformation("PresenceUpdated {User} {Before} {After}", user, before, after);
+
+        return Task.CompletedTask;
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (_client.ConnectionState == ConnectionState.Connected)
+        _isReady = false;
+
+        if (_client.ConnectionState != ConnectionState.Disconnected)
         {
             await _client.StopAsync();
             _logger.LogInformation("Discord bot stopped.");
+        }
+
+        if (_client.LoginState != LoginState.LoggedOut)
+        {
+            await _client.LogoutAsync();
         }
     }
 
@@ -386,10 +479,28 @@ public class DiscordBotService : IDiscordBotService, IDisposable
     private static string GetGuildIdCacheKey(string serverName) =>
         $"{GuildIdCacheKeyPrefix}{serverName.Trim().ToUpperInvariant()}";
 
+    private static string NormalizeBotToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return string.Empty;
+        }
+
+        var normalizedToken = token.Trim().Trim('"');
+
+        if (normalizedToken.StartsWith(BotTokenPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedToken = normalizedToken[BotTokenPrefix.Length..].Trim();
+        }
+
+        return normalizedToken;
+    }
+
     public void Dispose()
     {
         if (!_disposed)
         {
+            _startLock.Dispose();
             _client.Dispose();
             _disposed = true;
         }
