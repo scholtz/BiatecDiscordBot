@@ -1,6 +1,51 @@
 @BiatecDiscordBot_HostAddress = http://localhost:5201
 
-GET {{BiatecDiscordBot_HostAddress}}/weatherforecast/
+### Get bot status
+GET {{BiatecDiscordBot_HostAddress}}/api/discord/status
 Accept: application/json
 
-###
+### Get guild users
+GET {{BiatecDiscordBot_HostAddress}}/api/discord/guilds/123456789/users
+Accept: application/json
+
+### Send a direct message
+POST {{BiatecDiscordBot_HostAddress}}/api/discord/messages/send
+Content-Type: application/json
+
+{
+  "userId": 123456789,
+  "guildId": 987654321,
+  "message": "Hello from the API!"
+}
+
+### Create a question
+POST {{BiatecDiscordBot_HostAddress}}/api/questions
+Content-Type: application/json
+
+{
+  "text": "What is your favorite programming language?",
+  "guildId": 123456789,
+  "orderIndex": 1,
+  "options": [
+    { "text": "C#", "roleName": "CSharp Dev", "roleId": 111, "orderIndex": 1 },
+    { "text": "Python", "roleName": "Python Dev", "roleId": 222, "orderIndex": 2 },
+    { "text": "TypeScript", "roleName": "TS Dev", "roleId": 333, "orderIndex": 3 }
+  ]
+}
+
+### Get active questions for a guild
+GET {{BiatecDiscordBot_HostAddress}}/api/questions/guild/123456789
+Accept: application/json
+
+### Get a specific question
+GET {{BiatecDiscordBot_HostAddress}}/api/questions/1
+Accept: application/json
+
+### Get messages for a guild
+GET {{BiatecDiscordBot_HostAddress}}/api/messages/guild/123456789?page=1&pageSize=10
+Accept: application/json
+
+### Get messages by direction (incoming)
+GET {{BiatecDiscordBot_HostAddress}}/api/messages/direction/Incoming?page=1&pageSize=10
+Accept: application/json
+

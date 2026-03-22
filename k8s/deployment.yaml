@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: biatec-discord-bot
+  namespace: biatec-discord-bot
+  labels:
+    app: biatec-discord-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: biatec-discord-bot
+  template:
+    metadata:
+      labels:
+        app: biatec-discord-bot
+    spec:
+      containers:
+        - name: biatec-discord-bot
+          image: harbor.your-registry.com/biatec/discord-bot:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Production"
+            - name: ASPNETCORE_HTTP_PORTS
+              value: "8080"
+            - name: UseInMemoryDatabase
+              value: "false"
+            - name: Discord__Token
+              valueFrom:
+                secretKeyRef:
+                  name: discord-bot-secrets
+                  key: DISCORD__TOKEN
+            - name: ConnectionStrings__DefaultConnection
+              valueFrom:
+                secretKeyRef:
+                  name: discord-bot-secrets
+                  key: CONNECTIONSTRINGS__DEFAULTCONNECTION
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /api/discord/status
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/discord/status
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      imagePullSecrets:
+        - name: harbor-registry-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: biatec-discord-bot
+  namespace: biatec-discord-bot
+spec:
+  selector:
+    app: biatec-discord-bot
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: biatec-discord-bot-ingress
+  namespace: biatec-discord-bot
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: discord-bot.your-domain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: biatec-discord-bot
+                port:
+                  number: 80
