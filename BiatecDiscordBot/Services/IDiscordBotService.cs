@@ -33,6 +33,11 @@ public interface IDiscordBotService
     Task<bool> SendDirectMessageAsync(ulong userId, string message);
 
     /// <summary>
+    /// Sends a direct message with embeds to a specific user.
+    /// </summary>
+    Task<bool> SendDirectMessageAsync(ulong userId, string message, IReadOnlyCollection<DiscordMessageEmbedRequest> embeds);
+
+    /// <summary>
     /// Sends a message to a specific channel.
     /// </summary>
     Task<bool> SendChannelMessageAsync(ulong channelId, string message);

@@ -72,6 +72,41 @@ public class DiscordController : ControllerBase
     }
 
     /// <summary>
+    /// Simulates the n8n Discord node by sending a DM with optional embeds to a specific user.
+    /// </summary>
+    [HttpPost("messages/send/n8n")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> SendN8nMessage([FromBody] DiscordMessageRequest request)
+    {
+        var embeds = request.Embeds ?? [];
+
+        if (request.UserId == 0)
+        {
+            return BadRequest(new { Error = "UserId must be provided." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Content) && embeds.Count == 0)
+        {
+            return BadRequest(new { Error = "Content or at least one embed must be provided." });
+        }
+
+        var success = await _botService.SendDirectMessageAsync(request.UserId, request.Content, embeds);
+        if (!success)
+        {
+            return BadRequest(new { Error = "Failed to send n8n-style message. User may not exist or DMs may be disabled." });
+        }
+
+        return Ok(new
+        {
+            Success = true,
+            Message = "n8n-style message sent successfully.",
+            request.GuildId,
+            request.UserId
+        });
+    }
+
+    /// <summary>
     /// Sends a message to a specific Discord channel.
     /// </summary>
     /// <param name="channelId">The Discord channel ID.</param>

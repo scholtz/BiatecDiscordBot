@@ -107,6 +107,60 @@ public class DiscordControllerTests
     }
 
     [Fact]
+    public async Task SendN8nMessage_ShouldReturnBadRequest_WhenContentAndEmbedsMissing()
+    {
+        // Arrange
+        var request = new DiscordMessageRequest { UserId = 1 };
+
+        // Act
+        var result = await _controller.SendN8nMessage(request);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task SendN8nMessage_ShouldReturnOk_WhenSuccessful()
+    {
+        // Arrange
+        var request = new DiscordMessageRequest
+        {
+            GuildId = 919635005200793630,
+            UserId = 210740935577960448,
+            Content = "Ahoj",
+            Embeds =
+            [
+                new DiscordMessageEmbedRequest
+                {
+                    Title = "Survey",
+                    Description = "Select all that apply",
+                    Image = "https://i.imgur.com/AfFp7pu.png",
+                    Thumbnail = "https://i.imgur.com/AfFp7pu.png",
+                    Fields =
+                    [
+                        new DiscordMessageEmbedFieldRequest { Name = "poll_question_text", Value = "poll_question_text", Inline = true }
+                    ]
+                }
+            ]
+        };
+
+        _botServiceMock
+            .Setup(s => s.SendDirectMessageAsync(
+                request.UserId,
+                request.Content,
+                It.Is<IReadOnlyCollection<DiscordMessageEmbedRequest>>(embeds =>
+                    embeds.Count == 1 &&
+                    embeds.First().Title == "Survey")))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _controller.SendN8nMessage(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
     public async Task AssignRole_ShouldReturnOk_WhenSuccessful()
     {
         // Arrange

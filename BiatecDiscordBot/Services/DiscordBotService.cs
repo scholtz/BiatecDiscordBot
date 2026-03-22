@@ -264,6 +264,11 @@ public class DiscordBotService : IDiscordBotService, IDisposable
 
     public async Task<bool> SendDirectMessageAsync(ulong userId, string message)
     {
+        return await SendDirectMessageAsync(userId, message, Array.Empty<DiscordMessageEmbedRequest>());
+    }
+
+    public async Task<bool> SendDirectMessageAsync(ulong userId, string message, IReadOnlyCollection<DiscordMessageEmbedRequest> embeds)
+    {
         try
         {
             var user = await _client.GetUserAsync(userId);
@@ -274,17 +279,30 @@ public class DiscordBotService : IDiscordBotService, IDisposable
             }
 
             var dmChannel = await user.CreateDMChannelAsync();
-            await dmChannel.SendMessageAsync(message);
+            var discordEmbeds = embeds
+                .Select(BuildEmbed)
+                .Where(embed => embed != null)
+                .Cast<Embed>()
+                .ToArray();
+
+            var content = string.IsNullOrWhiteSpace(message) ? null : message;
+            if (content == null && discordEmbeds.Length == 0)
+            {
+                _logger.LogWarning("Cannot send a DM to user {UserId} without content or embeds.", userId);
+                return false;
+            }
+
+            await dmChannel.SendMessageAsync(text: content, embeds: discordEmbeds.Length == 0 ? null : discordEmbeds);
 
             // Track outgoing message
             using var scope = _serviceProvider.CreateScope();
             var tracker = scope.ServiceProvider.GetRequiredService<IMessageTrackingService>();
             await tracker.TrackMessageAsync(new TrackedMessage
             {
-                AuthorDiscordId = _client.CurrentUser.Id,
-                AuthorUsername = _client.CurrentUser.Username,
+                AuthorDiscordId = _client.CurrentUser?.Id ?? 0,
+                AuthorUsername = _client.CurrentUser?.Username ?? string.Empty,
                 ChannelId = dmChannel.Id,
-                Content = message,
+                Content = content ?? string.Empty,
                 Direction = MessageDirection.Outgoing,
                 MessageDiscordId = 0 // DM messages don't have guild context
             });
@@ -297,6 +315,46 @@ public class DiscordBotService : IDiscordBotService, IDisposable
             _logger.LogError(ex, "Failed to send DM to user {UserId}.", userId);
             return false;
         }
+    }
+
+    private static Embed? BuildEmbed(DiscordMessageEmbedRequest request)
+    {
+        var builder = new EmbedBuilder();
+        var hasContent = false;
+
+        if (!string.IsNullOrWhiteSpace(request.Title))
+        {
+            builder.WithTitle(request.Title);
+            hasContent = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            builder.WithDescription(request.Description);
+            hasContent = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Image))
+        {
+            builder.WithImageUrl(request.Image);
+            hasContent = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Thumbnail))
+        {
+            builder.WithThumbnailUrl(request.Thumbnail);
+            hasContent = true;
+        }
+
+        foreach (var field in request.Fields.Where(field =>
+                     !string.IsNullOrWhiteSpace(field.Name) &&
+                     !string.IsNullOrWhiteSpace(field.Value)))
+        {
+            builder.AddField(field.Name, field.Value, field.Inline);
+            hasContent = true;
+        }
+
+        return hasContent ? builder.Build() : null;
     }
 
     public async Task<bool> SendChannelMessageAsync(ulong channelId, string message)
@@ -506,3 +564,4 @@ public class DiscordBotService : IDiscordBotService, IDisposable
         }
     }
 }
+
