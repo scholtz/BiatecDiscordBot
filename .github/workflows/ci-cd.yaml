@@ -14,6 +14,8 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -35,6 +37,8 @@ jobs:
 
   docker-build-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: build-and-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
@@ -75,6 +79,8 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: docker-build-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
